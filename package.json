@@ -1,0 +1,26 @@
+{
+  "name": "sqlreports",
+  "version": "1.0.0",
+  "description": "These are automated reports in SQL happening every week/day",
+  "keywords": [
+    "mssql",
+    "sql",
+    "automation",
+    "scripting"
+  ],
+  "homepage": "https://github.com/r3turn0/sqlreports#readme",
+  "bugs": {
+    "url": "https://github.com/r3turn0/sqlreports/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/r3turn0/sqlreports.git"
+  },
+  "license": "ISC",
+  "author": "John Ericta",
+  "type": "commonjs",
+  "main": "index.js",
+  "scripts": {
+    "test": "test"
+  }
+}
