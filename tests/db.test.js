@@ -26,3 +26,18 @@ test('builds definitions from SQL files in a folder', async () => {
   assert.ok(Array.isArray(definitions));
   assert.ok(definitions.length >= 0);
 });
+
+test('splits multi-query scripts and comments declarations', () => {
+  const client = new MSSQL();
+  const script = `
+USE SampleDb
+DECLARE @AsOfDate date = CAST(GETDATE() AS date)
+SELECT @AsOfDate AS one;
+SELECT 2 AS two;
+`;
+  const queries = client.extractQueriesFromScript(script);
+  assert.ok(queries.length >= 1);
+  const joined = queries.join('\n');
+  assert.match(joined, /SELECT/i);
+  assert.match(joined, /DECLARE @AsOfDate date = CAST\(GETDATE\(\) AS date\)/i);
+});

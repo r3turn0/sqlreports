@@ -115,33 +115,92 @@ class MSSQL {
             return [];
         }
 
-        const analysis = this.analyzeQuery(cleaned);
-        if (analysis.valid) {
-            return [this.prepareQueryWithDefaults(cleaned)];
+        const statements = cleaned
+            .split(/;|\bGO\b/i)
+            .map((value) => value.trim())
+            .filter(Boolean);
+
+        const queries = [];
+        const setupStatements = [];
+
+        for (const statement of statements) {
+            const normalized = statement.replace(/\s+/g, ' ').trim();
+            if (!normalized) {
+                continue;
+            }
+
+            const queryIndex = normalized.search(/\b(?:WITH|SELECT)\b/i);
+            if (queryIndex >= 0) {
+                const setupText = normalized.slice(0, queryIndex).trim();
+                const queryText = normalized.slice(queryIndex).trim();
+                if (setupText) {
+                    const firstWord = setupText.split(' ')[0].toUpperCase();
+                    if (firstWord === 'USE' || firstWord === 'SET' || /^DECLARE\b/i.test(setupText)) {
+                        setupStatements.push(setupText);
+                    }
+                }
+
+                const analysis = this.analyzeQuery(queryText);
+                if (analysis.valid) {
+                    queries.push(this.prepareQueryWithDefaults(queryText, setupStatements));
+                }
+                continue;
+            }
+
+            const firstWord = normalized.split(' ')[0].toUpperCase();
+            if (firstWord === 'USE' || firstWord === 'SET' || /^DECLARE\b/i.test(normalized)) {
+                setupStatements.push(normalized);
+                continue;
+            }
+
+            const analysis = this.analyzeQuery(normalized);
+            if (analysis.valid) {
+                queries.push(this.prepareQueryWithDefaults(normalized, setupStatements));
+            }
         }
 
-        return [];
+        return queries;
     }
 
-    prepareQueryWithDefaults(queryText) {
+    prepareQueryWithDefaults(queryText, setupStatements = []) {
         if (typeof queryText !== 'string' || !queryText.trim()) {
             return queryText;
         }
 
+        const baseLines = [];
+        for (const setup of setupStatements || []) {
+            if (/^DECLARE\b/i.test(setup)) {
+                baseLines.push(`-- ${setup}`);
+            } else {
+                baseLines.push(setup);
+            }
+        }
+
         const trimmed = queryText.trim();
-        const needsDefaults = /\b@(?:AsOfDate|EndDate|StartDate)\b/i.test(trimmed)
-            && !/\bDECLARE\b.*\b@(?:AsOfDate|EndDate|StartDate)\b/i.test(trimmed);
+        const commented = trimmed
+            .split('\n')
+            .map((line) => {
+                if (/^\s*DECLARE\s+@(?:AsOfDate|EndDate|StartDate)\b/i.test(line)) {
+                    return `-- ${line.trim()}`;
+                }
+                return line;
+            })
+            .join('\n')
+            .trim();
+
+        const needsDefaults = /\b@(?:AsOfDate|EndDate|StartDate)\b/i.test(commented);
 
         if (!needsDefaults) {
-            return trimmed;
+            return [...baseLines, commented].filter(Boolean).join('\n');
         }
 
         return [
+            ...baseLines,
             'DECLARE @AsOfDate date = CAST(GETDATE() AS date);',
             'DECLARE @EndDate date = CAST(GETDATE() AS date);',
             'DECLARE @StartDate date = DATEADD(day, -14, GETDATE());',
-            trimmed
-        ].join('\n');
+            commented
+        ].filter(Boolean).join('\n');
     }
 
     analyzeQuery(queryText) {
@@ -181,7 +240,11 @@ class MSSQL {
                 return { valid: false, error: 'External rowset access is not allowed.' };
             }
 
-            if (firstWord === 'USE' || firstWord === 'SET' || firstWord === 'DECLARE') {
+            if (firstWord === 'USE' || firstWord === 'SET') {
+                continue;
+            }
+
+            if (/^DECLARE\b/i.test(normalized)) {
                 continue;
             }
 
