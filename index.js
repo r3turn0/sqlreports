@@ -5,12 +5,13 @@ const MSSQL = require('./db');
 async function main() {
   const client = new MSSQL({
     server: process.env.SQL_SERVER,
+    port: process.env.DB_PORT ? Number(process.env.DB_PORT) : 1433,
     database: process.env.SQL_DATABASE,
     user: process.env.SQL_USER,
     password: process.env.SQL_PASSWORD,
     options: {
-      encrypt: true,
-      trustServerCertificate: false
+      encrypt: process.env.DB_ENCRYPT ? process.env.DB_ENCRYPT.toLowerCase() === 'true' : true,
+      trustServerCertificate: process.env.DB_TRUST_CERT ? process.env.DB_TRUST_CERT.toLowerCase() === 'true' : false
     }
   });
 
