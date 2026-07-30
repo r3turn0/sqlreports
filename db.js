@@ -47,11 +47,24 @@ class MSSQL {
 
         try {
             const request = this.pool.request();
-            Object.entries(params).forEach(([name, value]) => {
+            const normalizedParams = { ...params };
+            const preparedQuery = this.prepareQueryWithDefaults(queryText);
+
+            if (!normalizedParams.AsOfDate) {
+                normalizedParams.AsOfDate = new Date();
+            }
+            if (!normalizedParams.EndDate) {
+                normalizedParams.EndDate = new Date();
+            }
+            if (!normalizedParams.StartDate) {
+                normalizedParams.StartDate = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
+            }
+
+            Object.entries(normalizedParams).forEach(([name, value]) => {
                 request.input(name, value);
             });
 
-            const result = await request.query(queryText);
+            const result = await request.query(preparedQuery);
             return result;
         } catch (err) {
             console.error('Error executing query:', err);
@@ -98,18 +111,96 @@ class MSSQL {
             .replace(/\r/g, '')
             .trim();
 
-        const segments = cleaned
-            .split(';')
+        if (!cleaned) {
+            return [];
+        }
+
+        const analysis = this.analyzeQuery(cleaned);
+        if (analysis.valid) {
+            return [this.prepareQueryWithDefaults(cleaned)];
+        }
+
+        return [];
+    }
+
+    prepareQueryWithDefaults(queryText) {
+        if (typeof queryText !== 'string' || !queryText.trim()) {
+            return queryText;
+        }
+
+        const trimmed = queryText.trim();
+        const needsDefaults = /\b@(?:AsOfDate|EndDate|StartDate)\b/i.test(trimmed)
+            && !/\bDECLARE\b.*\b@(?:AsOfDate|EndDate|StartDate)\b/i.test(trimmed);
+
+        if (!needsDefaults) {
+            return trimmed;
+        }
+
+        return [
+            'DECLARE @AsOfDate date = CAST(GETDATE() AS date);',
+            'DECLARE @EndDate date = CAST(GETDATE() AS date);',
+            'DECLARE @StartDate date = DATEADD(day, -14, GETDATE());',
+            trimmed
+        ].join('\n');
+    }
+
+    analyzeQuery(queryText) {
+        const cleaned = queryText
+            .replace(/\/\*[\s\S]*?\*\//g, ' ')
+            .replace(/--.*$/gm, ' ')
+            .replace(/\r/g, ' ')
+            .trim();
+
+        const statements = cleaned
+            .split(/;|\bGO\b/i)
             .map((value) => value.trim())
             .filter(Boolean);
 
-        return segments.filter((segment) => {
-            const normalized = segment.replace(/\b(?:USE|GO|DECLARE|SET)\b.*$/gim, '').trim();
-            return /\bSELECT\b/i.test(normalized)
-                && !/\b(?:EXEC|sp_executesql|xp_|sp_)\b/i.test(normalized)
-                && !/\b(?:INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|MERGE|CREATE)\b/i.test(normalized)
-                && !/\b(?:OPENROWSET|OPENQUERY)\b/i.test(normalized);
-        });
+        let queryCount = 0;
+
+        for (const statement of statements) {
+            const normalized = statement.replace(/\s+/g, ' ').trim();
+            if (!normalized) {
+                continue;
+            }
+
+            const firstWord = normalized.split(' ')[0].toUpperCase();
+            if (firstWord === 'GO') {
+                continue;
+            }
+
+            if (/\b(?:EXEC|sp_executesql|xp_|sp_)\b/i.test(normalized)) {
+                return { valid: false, error: 'Dynamic SQL is not allowed.' };
+            }
+
+            if (/\b(?:INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|MERGE|CREATE)\b/i.test(normalized)) {
+                return { valid: false, error: 'Only SELECT statements are allowed.' };
+            }
+
+            if (/\b(?:OPENROWSET|OPENQUERY)\b/i.test(normalized)) {
+                return { valid: false, error: 'External rowset access is not allowed.' };
+            }
+
+            if (firstWord === 'USE' || firstWord === 'SET' || firstWord === 'DECLARE') {
+                continue;
+            }
+
+            if (/^WITH\b/i.test(normalized) || /^SELECT\b/i.test(normalized)) {
+                queryCount += 1;
+                if (queryCount > 1) {
+                    return { valid: false, error: 'Only a single statement is allowed.' };
+                }
+                continue;
+            }
+
+            return { valid: false, error: 'Only SELECT statements are allowed.' };
+        }
+
+        return { valid: queryCount === 1, error: queryCount === 1 ? null : 'Only SELECT statements are allowed.' };
+    }
+
+    isScriptSafe(scriptText) {
+        return this.analyzeQuery(scriptText).valid;
     }
 
     validateQuery(queryText) {
@@ -120,34 +211,9 @@ class MSSQL {
                 throw new Error('Query must be a non-empty string.');
             }
 
-            const normalized = entry
-                .replace(/\/\*[\s\S]*?\*\//g, ' ')
-                .replace(/--.*$/gm, ' ')
-                .trim();
-
-            const statements = normalized
-                .split(';')
-                .map((value) => value.trim())
-                .filter(Boolean);
-
-            if (statements.length > 1) {
-                throw new Error('Only a single statement is allowed.');
-            }
-
-            if (/\b(?:EXEC|sp_executesql|xp_|sp_)\b/i.test(normalized)) {
-                throw new Error('Dynamic SQL is not allowed.');
-            }
-
-            if (!/\bSELECT\b/i.test(normalized)) {
-                throw new Error('Only SELECT statements are allowed.');
-            }
-
-            if (/\b(?:INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|MERGE|CREATE)\b/i.test(normalized)) {
-                throw new Error('Only SELECT statements are allowed.');
-            }
-
-            if (/\b(?:OPENROWSET|OPENQUERY)\b/i.test(normalized)) {
-                throw new Error('External rowset access is not allowed.');
+            const analysis = this.analyzeQuery(entry);
+            if (!analysis.valid) {
+                throw new Error(analysis.error || 'Query script contains unsupported or unsafe statements.');
             }
         });
 
@@ -190,7 +256,11 @@ class MSSQL {
             const combinedRows = [];
 
             for (const queryText of queries) {
-                const result = await this.query(queryText);
+                const result = await this.query(queryText, {
+                    AsOfDate: new Date(),
+                    EndDate: new Date(),
+                    StartDate: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000)
+                });
                 const rows = result.recordset || [];
                 combinedRows.push(...rows);
             }
