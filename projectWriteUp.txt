@@ -1,0 +1,154 @@
+The archticture (the plan):
++----------------------+
+| Report Definitions   |
+| reports.json         |
++----------+-----------+
+           |
+           v
++----------------------+
+| Configuration Loader |
++----------+-----------+
+           |
+           v
++----------------------+
+| SQL Security         |
+| Validator            |
++----------+-----------+
+           |
+           v
++----------------------+
+| MSSQL Service        |
+| Connection Pool      |
++----------+-----------+
+           |
+           v
++----------------------+
+| Workbook Generator   |
+| ExcelJS              |
++----------+-----------+
+           |
+           v
++----------------------+
+| | OneDrive Upload      |
++----------+-----------+
+           |
+           v
++----------------------+
+| Power Automate Flow  |
+| Automated Emailing   |
++----------------------+
+
+Example of the JSON file, note some queries can have an array of queries that need to be built as a singular query and allow for multiple result sets to a single excel worksheet:
+
+[
+  {
+    "name": "Sales Summary",
+    "query": "SELECT * FROM dbo.SalesSummary"
+  },
+  {
+    "name": "Customer Activity",
+    "query": ["SELECT * FROM dbo.CustomerActivity", ...]
+  }
+]
+
+SQL Security Validation Rules
+The validator should reject any query containing:
+INSERT
+UPDATE
+DELETE
+DROP
+ALTER
+TRUNCATE
+MERGE
+EXEC
+CREATE
+Additional controls:
+Allow Only SELECT
+/^\\s*SELECT\\b/i
+Block Multiple Statements
+Reject:
+SELECT * FROM Table1;
+SELECT * FROM Table2;
+Check: query.split(";").filter(x => x.trim()).length > 1
+
+Block Dynamic SQL
+Reject: EXEC(...)
+sp_executesql
+
+Optional Additional Protection
+Validate against:
+
+-- comments
+/* comments */
+xp_
+sp_
+OPENROWSET
+OPENQUERY
+
+Database Service
+Use a single connection pool:
+const sql = require("mssql");
+
+const pool = new sql.ConnectionPool({
+  server: process.env.SQL_SERVER,
+  database: process.env.SQL_DATABASE,
+  user: process.env.SQL_USER,
+  password: process.env.SQL_PASSWORD,
+  options: {
+    encrypt: true,
+    trustServerCertificate: false
+  }
+});
+
+module.exports = pool;
+
+Recommended:
+Connection pooling enabled
+Query timeout configured
+Result size limits configured
+
+Workbook Generation
+Using ExcelJS: const workbook = new Excel.Workbook();
+const workbook = new Excel.Workbook();
+For each report: const ws = workbook.addWorksheet(reportName);
+Populate: ws.columns = columns;
+ws.addRows(rows);
+Apply formatting:
+Header Formatting
+headerCell.font = {
+  bold: true
+};
+Freeze Top Row
+ws.views = [
+  {
+    state: "frozen",
+    ySplit: 1
+  }
+];
+AutoFilter
+ws.autoFilter = {
+  from: "A1",
+  to: lastCell
+};
+Auto-Size Columns
+column.width =
+Math.max(
+  header.length,
+  maxCellLength
+) + 2;
+
+Worksheet Naming Logic
+Excel restrictions:
+Maximum 31 characters
+Invalid characters: \ / ? * [ ] :
+
+Utility:
+function sanitizeWorksheetName(name) {
+    return name
+      .replace(/[\\\\/?*\\[\\]:]/g, "_")
+      .substring(0, 31);
+}
+
+Workbook Naming Convention
+Requirement: KPIReport_YYYYMMDD.xlsx
+

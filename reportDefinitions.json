@@ -1,0 +1,22 @@
+[
+  {
+    "name": "Sample Sales Summary",
+    "query": "SELECT TOP 10 * FROM dbo.SalesSummary",
+    "sourceFile": "SQL/Sample.sql"
+  },
+  {
+    "name": "Admissions",
+    "query": "SELECT TOP 10 * FROM dbo.Client_Episodes_All",
+    "sourceFile": "SQL/Admissions.sql"
+  },
+  {
+    "name": "Billing Holds",
+    "query": "SELECT TOP 10 * FROM dbo.BillingHolds",
+    "sourceFile": "SQL/Billing Holds.sql"
+  },
+  {
+    "name": "Census and ADC",
+    "query": "SELECT TOP 10 * FROM dbo.Census",
+    "sourceFile": "SQL/Census and ADC by Service Line and Branch.sql"
+  }
+]

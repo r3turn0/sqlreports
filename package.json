@@ -22,5 +22,10 @@
   "main": "index.js",
   "scripts": {
     "test": "test"
+  },
+  "dependencies": {
+    "dotenv": "^17.4.2",
+    "exceljs": "^4.4.0",
+    "mssql": "^12.7.0"
   }
 }
