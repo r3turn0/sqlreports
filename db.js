@@ -256,6 +256,16 @@ class MSSQL {
                 continue;
             }
 
+            if (/^\(\s*SELECT\b/i.test(normalized)) {
+                queryCount += 1;
+                continue;
+            }
+
+            if (/^WITH\s+\w+\s+AS\b/i.test(normalized) || /^SELECT\b/i.test(normalized)) {
+                queryCount += 1;
+                continue;
+            }
+
             return { valid: false, error: 'Only SELECT statements are allowed.' };
         }
 
